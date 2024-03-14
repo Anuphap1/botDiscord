@@ -1,0 +1,145 @@
+const { Client, GatewayIntentBits } = require("discord.js");
+const {
+  joinVoiceChannel,
+  createAudioPlayer,
+  createAudioResource,
+  StreamType,
+} = require("@discordjs/voice");
+
+const dotenv = require("dotenv");
+dotenv.config();
+
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.GuildMembers,
+  ],
+});
+
+const player = createAudioPlayer();
+const memberStatus = {}; // เก็บข้อมูลเวลาเข้า-ออก โดยใช้ userId เป็น key
+
+client.on("ready", () => {
+  console.log(`Logged in as ${client.user.tag}!`);
+});
+
+client.on("interactionCreate", async (interaction) => {
+  if (!interaction.isCommand()) return;
+
+  if (interaction.commandName === "มานี่") {
+    await interaction.reply("ฉันคือบอทททท!");
+
+    const memberChannel = interaction.member.voice.channel;
+    if (memberChannel) {
+      try {
+        // เชื่อมต่อกับ voice channel ที่ member อยู่
+        const voiceConnection = joinVoiceChannel({
+          channelId: memberChannel.id,
+          guildId: memberChannel.guild.id,
+          adapterCreator: memberChannel.guild.voiceAdapterCreator,
+        });
+
+        // เล่นไฟล์ audio เมื่อ member พิมพ์คำสั่ง "ping"
+        const resource = createAudioResource("voice/first_welcome.mp3", {
+          inputType: StreamType.Arbitrary,
+          metadata: {
+            title: "A good song!",
+          },
+        });
+        player.play(resource);
+        voiceConnection.subscribe(player);
+        console.log("===============================================");
+
+        console.log(
+          `${interaction.user.tag} ได้เข้าห้อง ${memberChannel.name}`
+        );
+
+        // ตรวจสอบเหตุการณ์เมื่อมีการเปลี่ยนแปลงในสถานะของ voice channel
+        client.on("voiceStateUpdate", async (oldState, newState) => {
+          const userId = newState.member.user.id;
+          const now = new Date();
+
+          if (!memberStatus[userId]) {
+            memberStatus[userId] = { joined: null, left: null };
+          }
+
+          if (oldState.channelId !== newState.channelId) {
+            const memberChannel = newState.channel;
+
+            if (memberChannel) {
+              // เมื่อ member เข้าห้อง
+              memberStatus[userId].joined = now;
+              console.log("===============================================");
+              console.log(
+                `${newState.member.user.tag} ได้เข้าห้อง ${memberChannel.name} เวลา ${now}`
+              );
+
+              // เล่นเสียงเมื่อ member เข้าห้อง
+              const voiceConnection = joinVoiceChannel({
+                channelId: memberChannel.id,
+                guildId: memberChannel.guild.id,
+                adapterCreator: memberChannel.guild.voiceAdapterCreator,
+              });
+              await new Promise((resolve) => setTimeout(resolve, 500)); // รอ 0.5 วินาที
+
+              const resource = createAudioResource("voice/welcome.mp3", {
+                inputType: StreamType.Arbitrary,
+                metadata: {
+                  title: "A good song!",
+                },
+              });
+              player.play(resource);
+              voiceConnection.subscribe(player);
+            } else {
+              // เมื่อ member ออกจากห้อง
+              memberStatus[userId].left = now;
+              console.log("===============================================");
+
+              console.log(
+                `${newState.member.user.tag} ได้ออกจากห้อง เวลา ${now}`
+              );
+
+              // ตรวจสอบว่า Text Channel มีหรือไม่ และเป็น TextChannel หรือไม่
+              // newState.member
+              //   .send(`แล้วเจอกันใหม่นะะะ ( คุณได้ออกจากห้องเสียง เวลา ${now})`)
+              //   .then(() => console.log("ข้อความถูกส่งไปยังผู้ใช้"))
+              //   .catch((error) =>
+              //     console.error(`เกิดข้อผิดพลาดในการส่งข้อความ: ${error}`)
+              //   );
+              // หยุดเล่นเสียงเมื่อ member ออกจากห้อง
+              player.stop();
+
+              const voiceChannelId = oldState.channelId;
+              const voiceChannel =
+                newState.guild.channels.cache.get(voiceChannelId);
+
+              if (voiceChannel && voiceChannel.members.size > 1) {
+                // ถ้ายังมีคนในห้อง
+                console.log(
+                  "-------- มีคนเหลือในห้อง ดังนั้นเล่นเสียงใหม่อีกครั้ง --------"
+                );
+                const newResource = createAudioResource("voice/bye bye.mp3", {
+                  inputType: StreamType.Arbitrary,
+                  metadata: {
+                    title: "Another good song!",
+                  },
+                });
+                player.play(newResource);
+              } else {
+                // ถ้าไม่มีคนในห้อง
+                console.log("-------- ไม่มีคนเหลือในห้อง --------");
+              }
+            }
+          }
+        });
+      } catch (error) {
+        console.error(error);
+      }
+    } else {
+      console.log("Member is not in a voice channel");
+    }
+  }
+});
+
+client.login(process.env.TOKEN);
